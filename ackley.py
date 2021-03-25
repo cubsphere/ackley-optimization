@@ -1,9 +1,11 @@
 import numpy as np
 import sys
 import random
+import pandas as pd
+import time
 
-BETA = 0.1
-epsilon = 0.01
+BETA = np.pi * (5/180)
+epsilon = 1
 AUTO = 0.1
 
 class Ackley:
@@ -26,8 +28,9 @@ class Chromosome:
         else:
             self.sigma = np.random.uniform(1, 3)
         if alphas:
-            K = N * (N-1) / 2
-            self.alphas = [0] * K
+            K = N * (N-1) // 2
+            #self.alphas = [0] * K
+            self.alphas = np.random.normal(0, BETA, K)
         #self.mutations = 0
         #self.successes = 0
         self.fun = fun
@@ -36,9 +39,6 @@ class Chromosome:
     def updateFit(self):
         self.fitness = self.fun(self.values)
         return 'fitness updated'
-    
-    def matrix(self, i, j):
-        pass
     
     def ratio(self):
         pass
@@ -72,12 +72,16 @@ class Optimizer:
         if hasattr(self.pop[0], "sigma"):
             child.sigma = (parents[0].sigma + parents[1].sigma) / 2
         else:
-            child.sigmas = [(s1 + s1)/2 for (s1, s2) in zip(parents[0].sigmas, parents[1].sigmas)]
+            child.sigmas = [(s1 + s2)/2 for (s1, s2) in zip(parents[0].sigmas, parents[1].sigmas)]
+        if hasattr(self.pop[0], "alphas"):
+            child.alphas = [(a1 + a2)/2 for (a1, a2) in zip(parents[0].alphas, parents[1].alphas)]
         return child
     
     def multiple_mean(self):
         new_values = []
         single_sigma = hasattr(self.pop[0], "sigma")
+        uses_alphas = hasattr(self.pop[0], "alphas")
+        new_alphas = []
         new_sigmas = []
         for i in range(self.N):
             parents = random.sample(self.pop, 2)
@@ -86,10 +90,20 @@ class Optimizer:
             if not single_sigma:
                 sigma_mean = (parents[0].sigmas[i] + parents[1].sigmas[i])/2
                 new_sigmas.append(sigma_mean)
+            if uses_alphas:
+                alpha_mean = (parents[0].alphas[i] + parents[1].alphas[i])/2
+                new_alphas.append(alpha_mean)
+        if uses_alphas:
+            for i in range(self.N, len(self.pop[0].alphas)):
+                parents = random.sample(self.pop, 2)
+                if uses_alphas:
+                    alpha_mean = (parents[0].alphas[i] + parents[1].alphas[i])/2
+                    new_alphas.append(alpha_mean)
+            child.alphas = new_alphas
         child = self.chromosome_init()
         if single_sigma:
             parents = random.sample(self.pop, 2)
-            child.sigma = (parents[0].sigma + parents[2].sigma) / 2
+            child.sigma = (parents[0].sigma + parents[1].sigma) / 2
         else:
             child.sigmas = new_sigmas
         child.values = new_values
@@ -110,7 +124,7 @@ class Optimizer:
             new_chromosome = [self.bounded(x + y) for x, y in zip(mutation_vector, chromosome.values)]
             new_chromosome_fit = self.fun(new_chromosome)
             if new_chromosome_fit < chromosome.fitness:
-                chromosome.values = new_chromosome.copy()
+                chromosome.values = new_chromosome#.copy()
                 chromosome.sigma = new_sigma
                 chromosome.fitness = new_chromosome_fit
                 #chromosome.successes += 1
@@ -125,12 +139,45 @@ class Optimizer:
             new_chromosome = [self.bounded(x + y) for x, y in zip(mutation_sigma, chromosome.values)]
             new_chromosome_fit = self.fun(new_chromosome)
             if new_chromosome_fit < chromosome.fitness:
-                chromosome.values = new_chromosome.copy()
-                chromosome.sigma = new_sigmas.copy()
+                chromosome.values = new_chromosome#.copy()
+                chromosome.sigmas = new_sigmas#.copy()
                 chromosome.fitness = new_chromosome_fit
 
     def mutation_correlated(self, tau_global, tau_fine, total_pop):
-        pass
+        for chromosome in total_pop:
+            mutation_global = np.random.normal(0,1)
+            mutation_vector = np.random.normal(0,1,self.N)
+            new_sigmas = [max(epsilon, sigmai * np.exp(tau_global*mutation_global + tau_fine*mutation_vector[i])) for i, sigmai in enumerate(chromosome.sigmas)]
+            new_alphas = [self.alphaCheck(alpha+(BETA*mutation_global)) for alpha in chromosome.alphas]
+            new_C = self.Cmatrix(new_sigmas, new_alphas)
+            mutation_matrix = np.random.multivariate_normal(np.zeros(self.N), new_C)
+            new_chromosome = [self.bounded(x + y) for x, y in zip(mutation_matrix, chromosome.values)]
+            new_chromosome_fit = self.fun(new_chromosome)
+            if new_chromosome_fit < chromosome.fitness:
+                chromosome.values = new_chromosome#.copy()
+                chromosome.sigmas = new_sigmas#.copy()
+                chromosome.alphas = new_alphas#.copy()
+                chromosome.fitness = new_chromosome_fit
+    
+    def alphaCheck(self, alpha):
+        if abs(alpha) > np.pi:
+            return alpha - (2*np.pi*np.sign(alpha))
+        else:
+            return alpha
+
+    def Cmatrix(self, sigmas, alphas):
+        C = np.zeros((self.N, self.N))
+        count=0
+        for i in range(self.N):
+            for j in range(self.N):
+                if i==j:
+                    C[i][j] = sigmas[i]*sigmas[i]
+                elif j>i:
+                    C[i][j] = (((sigmas[i]*sigmas[i]) * sigmas[j]*sigmas[j])/2)*np.tan(2*alphas[count])
+                    count+=1
+                else:
+                    C[i][j] = C[j][i]
+        return C
 
     # survival functions
 
@@ -145,28 +192,26 @@ class Optimizer:
         for _ in range(self.popsize):
             self.pop.append(self.chromosome_init())
 
-    def optimize(self, N, fun, min_val, max_val):
+    def optimize(self, N, fun, min_val, max_val, recording_interval = 20):
         self.N = N
         self.fun = fun
         self.pop_init()
         self.min = min_val
         self.max = max_val
+        global epsilon
+        orig_epsilon = epsilon
+        gen_reached_e15 = 0
+        per_iteration_info = []
         last_best_i = 0
         last_best = float("inf")
+        init_time = time.time()
         for i in range(self.generations):
-            if i%10 == 0:
-                print(f"{i}-ndth generation")
-                best = self.pop[0]
-                print(f"best fitness: {best.fitness}\nbest sigma: {best.sigma}")
-                if best.fitness < last_best * 0.9:
-                    last_best_i = i
-                    last_best = best.fitness
-                else:
-                    if i - last_best_i > 30:
-                        global epsilon
-                        print(f"reducing epsilon from {epsilon} to {AUTO * epsilon}")
-                        epsilon *= AUTO
-                        last_best_i = 0
+            if gen_reached_e15 == 0 and self.pop[0].fitness <= 1e-14:
+                gen_reached_e15 = i
+            if i%20 == 0:
+                per_iteration_info.append((i, self.pop[0].fitness, sum([c.fitness for c in self.pop])/self.N))
+            #self.printbest(i)
+            last_best, last_best_i = self.autoadapt(i, last_best, last_best_i)
             pop_children = []
             for _ in range(self.children):
                 child = self.recombination()
@@ -174,8 +219,34 @@ class Optimizer:
             candidates = self.surviving_parents() + pop_children
             self.mutation(candidates)
             self.select_survivors(candidates)
-        best = min(self.pop, key=lambda c: c.fitness)
-        return best.values, best.fitness
+        best = self.pop[0]
+        epsilon = orig_epsilon
+        return per_iteration_info, best.fitness, gen_reached_e15, time.time() - init_time
+
+    def printbest(self, i):
+        if i%5 != 0:
+            return
+        print(f"{i}-rdndth generation")
+        best = self.pop[0]
+        print(f"best fitness: {best.fitness}")
+        if hasattr(best, "sigma"):
+            print(f"best sigma: {best.sigma}")
+        else:
+            print(f"best sigmas mean: {sum(best.sigmas)/len(best.sigmas)}")
+
+
+    def autoadapt(self, i, last_best, last_best_i):
+        best = self.pop[0]
+        if best.fitness < last_best * 0.9:
+            last_best_i = i
+            last_best = best.fitness
+        else:
+            if i - last_best_i >= 10:
+                global epsilon
+                epsilon *= AUTO
+                last_best_i = i
+        return last_best, last_best_i
+
 
     #init functions
 
@@ -232,11 +303,30 @@ def dumbfun(listy):
     y = listy[1]
     return np.cos(x/500) + np.cos(x) + np.cos(y/500) + np.cos(y)
 
+mutations = ["simple", "non-correlated", "correlated"]
+recombinations = ["two-mean", "multiple-mean"]
+survivals = ["comma", "plus"]
+
 def main():
     a = Ackley(N=30)
-    opti = Optimizer(mutation="simple", survival='plus', generations=2000)
-    best, fit = opti.optimize(30, a.eval, -15, 15)
-    #best, fit = opti.optimize(2, dumbfun, 0, 2*np.pi)
-    print(f"best values: {best}, fitness: {fit}")
+    for mutation in mutations:
+        for recomb in recombinations:
+            for survival in survivals:
+                data = {'history': [],
+                        'best_fitness': [],
+                        'generation_n': [],
+                        'runtime': []}
+                iterations = 30
+                for _ in range(30 if mutation != "correlated" else 3):
+                    opti = Optimizer(mutation=mutation, recombination=recomb, survival=survival, generations=1000)
+                    history, best_fitness, generation_n, runtime = opti.optimize(30, a.eval, -15, 15)
+                    data['history'].append(history)
+                    data['best_fitness'].append(best_fitness)
+                    data['generation_n'].append(generation_n)
+                    data['runtime'].append(runtime)
+                file_name = f"{mutation}_{recomb}_{survival}.csv" 
+                df = pd.DataFrame(data, columns = ['history', 'best_fitness', 'generation_n', 'runtime'])
+                df.to_csv(file_name, sep='\t')
+                print(f'saving file: {file_name}')
 
 main()
