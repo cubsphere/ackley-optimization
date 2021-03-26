@@ -93,6 +93,7 @@ class Optimizer:
             if uses_alphas:
                 alpha_mean = (parents[0].alphas[i] + parents[1].alphas[i])/2
                 new_alphas.append(alpha_mean)
+        child = self.chromosome_init()
         if uses_alphas:
             for i in range(self.N, len(self.pop[0].alphas)):
                 parents = random.sample(self.pop, 2)
@@ -100,7 +101,6 @@ class Optimizer:
                     alpha_mean = (parents[0].alphas[i] + parents[1].alphas[i])/2
                     new_alphas.append(alpha_mean)
             child.alphas = new_alphas
-        child = self.chromosome_init()
         if single_sigma:
             parents = random.sample(self.pop, 2)
             child.sigma = (parents[0].sigma + parents[1].sigma) / 2
