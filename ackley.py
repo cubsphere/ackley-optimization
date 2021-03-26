@@ -18,7 +18,7 @@ class Ackley:
     def eval(self, x: list):
         first_summation = (-self.C2) * np.sqrt((1/self.N) * sum([xi*xi for xi in x]))
         second_summation = (1/self.N) * sum([np.cos(self.C3 * xi) for xi in x])
-        return ((-self.C1) * np.exp(first_summation)) - np.exp(second_summation) + self.C1 + np.e
+        return ((-self.C1) * np.exp(first_summation)) + self.C1 + np.e - np.exp(second_summation)
 
 class Chromosome:
     def __init__(self, N, fun, multiple_sigmas = False, alphas = False):
@@ -208,7 +208,7 @@ class Optimizer:
         for i in range(self.generations):
             if gen_reached_e15 == 0 and self.pop[0].fitness <= 1e-14:
                 gen_reached_e15 = i
-            if i%20 == 0:
+            if i%recording_interval == 0:
                 per_iteration_info.append((i, self.pop[0].fitness, sum([c.fitness for c in self.pop])/self.N))
             #self.printbest(i)
             last_best, last_best_i = self.autoadapt(i, last_best, last_best_i)
@@ -316,7 +316,6 @@ def main():
                         'best_fitness': [],
                         'generation_n': [],
                         'runtime': []}
-                iterations = 30
                 for _ in range(30 if mutation != "correlated" else 3):
                     opti = Optimizer(mutation=mutation, recombination=recomb, survival=survival, generations=1000)
                     history, best_fitness, generation_n, runtime = opti.optimize(30, a.eval, -15, 15)
