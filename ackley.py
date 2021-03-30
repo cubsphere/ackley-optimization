@@ -146,9 +146,9 @@ class Optimizer:
     def mutation_correlated(self, tau_global, tau_fine, total_pop):
         for chromosome in total_pop:
             mutation_global = np.random.normal(0,1)
-            mutation_vector = np.random.normal(0,1,self.N)
+            mutation_vector = np.random.normal(0,1,len(self.pop[0].alphas))
             new_sigmas = [max(epsilon, sigmai * np.exp(tau_global*mutation_global + tau_fine*mutation_vector[i])) for i, sigmai in enumerate(chromosome.sigmas)]
-            new_alphas = [self.alphaCheck(alpha+(BETA*mutation_global)) for alpha in chromosome.alphas]
+            new_alphas = [self.alphaCheck(alpha+(BETA*mutation_vector[i])) for i, alpha in enumerate(chromosome.alphas)]
             new_C = self.Cmatrix(new_sigmas, new_alphas)
             mutation_matrix = np.random.multivariate_normal(np.zeros(self.N), new_C)
             new_chromosome = [self.bounded(x + y) for x, y in zip(mutation_matrix, chromosome.values)]
